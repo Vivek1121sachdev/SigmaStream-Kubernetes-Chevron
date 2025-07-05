@@ -1,0 +1,68 @@
+flowchart TD
+  %% AWS Cloud
+  subgraph AWS["AWS Cloud (us-east-1)"]
+    direction TB
+    subgraph VPC["VPC (10.0.0.0/16)"]
+      subgraph Public["Public Subnets"]
+        LB["AWS NLB (idempiere-lb)\n80→9090, 443→9443, 4000→4000"]
+      end
+      subgraph Private["Private Subnets"]
+        subgraph EKS["EKS Cluster (idempiere-prod-cluster)"]
+          subgraph AppNodes["App Node Group (c6i.2xlarge)\ntaint: app=true:NoSchedule"]
+            IDEMPIERE["Deployment: idempiere\n(image: public.ecr.aws/l1d4e6g1/sigmastream-repo:v1)\nport: 9090\nCPU: 6144m, Memory: 13313Mi"]
+            HPA["HPA: my-app-hpa\nCPU/Memory autoscale: 1-11 pods"]
+            AUTOSCALER["Cluster Autoscaler\n(taint: app=true:NoSchedule)"]
+          end
+          subgraph MongoNodes["Mongo Node Group (c6i.2xlarge)\ntaint: mongodb=true:NoSchedule"]
+            MONGODB["StatefulSet: mongodb\n(image: mongo:3.6)\nport: 27017\nStorage: 1Ti GP3"]
+            BOOTSTRAP["Job: db-bootstrap\n(PostgreSQL data restore)"]
+          end
+        end
+        SVC["Service: idempiere-lb\nType: LoadBalancer"]
+        NP["NetworkPolicy: allow 9090, 9443"]
+      end
+      subgraph DBs["DB Subnets (Private)"]
+        Aurora["Aurora PostgreSQL Serverless v2\n(Engine: 15.10)\nMaster: auroraadmin\nDatabase: kingfisher"]
+      end
+    end
+    ECR["ECR: public.ecr.aws/l1d4e6g1/sigmastream-repo"]
+    Azure["Azure Blob Storage\n(fresh-kingfisher11300625.dump)"]
+  end
+
+  %% External Access
+  Internet["Internet"] --> LB
+  LB -->|80,443,4000| SVC
+  SVC --> IDEMPIERE
+
+  %% Internal Connections
+  IDEMPIERE -->|JDBC/SSL| Aurora
+  IDEMPIERE -->|27017| MONGODB
+  BOOTSTRAP -->|Restore| Aurora
+  Azure -->|Download dump| BOOTSTRAP
+
+  %% EKS Management
+  EKS --> AppNodes
+  EKS --> MongoNodes
+  HPA --> IDEMPIERE
+  AUTOSCALER --> EKS
+  NP --> IDEMPIERE
+  ECR --> IDEMPIERE
+
+  %% Security Groups
+  Aurora -.->|SG: VPC only| EKS
+  EKS -->|Private Subnets| Aurora
+
+  %% Application Access
+  IDEMPIERE -->|Health Check| LB
+  LB -->|https://<lb-url>/WITSMLStore/services/Store| Internet
+
+  %% Styling
+  classDef aws fill:#FF9900,stroke:#232F3E,stroke-width:2px,color:#fff
+  classDef k8s fill:#326CE5,stroke:#232F3E,stroke-width:2px,color:#fff
+  classDef db fill:#D73A49,stroke:#232F3E,stroke-width:2px,color:#fff
+  classDef external fill:#6C757D,stroke:#232F3E,stroke-width:2px,color:#fff
+
+  class AWS,VPC,ECR aws
+  class EKS,AppNodes,MongoNodes,IDEMPIERE,HPA,AUTOSCALER,MONGODB,BOOTSTRAP,SVC,NP k8s
+  class Aurora db
+  class Internet,Azure external

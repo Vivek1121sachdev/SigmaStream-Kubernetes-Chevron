@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: idempiere-allow-ingress
+  namespace: app-prod
+spec:
+  podSelector:
+    matchLabels:
+      app: idempiere
+  policyTypes:
+    - Ingress
+  ingress:
+    - from: []  # Allow from any source (including LoadBalancer)
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 9443 

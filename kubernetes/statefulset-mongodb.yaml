@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: app-prod
+spec:
+  serviceName: mongodb-svc
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      tolerations:
+      - key: mongodb
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      containers:
+      - name: mongodb
+        image: mongo:3.6
+        command: ["mongod", "--bind_ip_all"]
+        ports:
+        - containerPort: 27017
+        volumeMounts:
+        - name: mongodb-pvc
+          mountPath: /data/db
+        - name: keyfile
+          mountPath: /etc/mongodb-keyfile
+          readOnly: true
+      volumes:
+      - name: keyfile
+        secret:
+          secretName: mongodb-keyfile
+  volumeClaimTemplates:
+  - metadata:
+      name: mongodb-pvc
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: gp3
+      resources:
+        requests:
+          storage: 1Ti

@@ -1,0 +1,94 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-bootstrap
+  namespace: app-prod
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      tolerations:
+      - key: mongodb
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      containers:
+      - name: db-bootstrap
+        image: postgres:15
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            set -e
+            apt-get update && apt-get install -y curl
+
+            admin_user="$ADMIN_USER"
+            admin_password="$ADMIN_PASSWORD"
+            db_host="$DB_HOST"
+            app_user="$APP_USER"
+            app_password="$APP_PASSWORD"
+            db_name="$DB_NAME"
+
+            admin_conn="postgresql://${admin_user}:${admin_password}@${db_host}:5432/postgres"
+            app_conn="postgresql://${app_user}:${app_password}@${db_host}:5432/postgres"
+            restore_conn="postgresql://${app_user}:${app_password}@${db_host}:5432/${db_name}"
+
+            echo "Waiting for DB to be ready..."
+            until psql "$admin_conn" -c '\q'; do
+              echo "Database not ready. Sleeping..."
+              sleep 5
+            done
+
+            echo "Creating user if not exists..."
+            psql "$admin_conn" -tc "SELECT 1 FROM pg_roles WHERE rolname='$app_user'" | grep -q 1 || \
+            psql "$admin_conn" -c "CREATE USER $app_user WITH LOGIN CREATEDB CREATEROLE INHERIT CONNECTION LIMIT -1 PASSWORD '$app_password';"
+
+            echo "Checking if database exists..."
+            db_exists=$(psql "$admin_conn" -tAc "SELECT 1 FROM pg_database WHERE datname='$db_name'")
+            if [ "$db_exists" = "1" ]; then
+              echo "Database '$db_name' already exists. Skipping creation and restore."
+            else
+              echo "Creating database $db_name..."
+              psql "$app_conn" -c "CREATE DATABASE $db_name OWNER $app_user;"
+
+              echo "Downloading dump file from Azure Blob Storage..."
+              curl -o /tmp/kingfisher.dump "https://ssdump.blob.core.windows.net/database/fresh-kingfisher11300625.dump?sp=rw&st=2025-07-02T10:18:57Z&se=2026-01-31T18:18:57Z&sv=2024-11-04&sr=b&sig=4xPEHEX24mm%2B85cMTpAF9MBkNDWHKC%2FXwgvTdQwQd7Y%3D"
+
+              
+
+              echo "Restoring dump into database..."
+              pg_restore --no-owner --role=$app_user --dbname="$restore_conn" /tmp/kingfisher.dump
+              
+
+              echo "Bootstrap and restore completed successfully."
+            fi
+        env:
+        - name: ADMIN_USER
+          valueFrom:
+            secretKeyRef:
+              name: aurora-db-credentials
+              key: admin_user
+        - name: ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: aurora-db-credentials
+              key: admin_password
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: aurora-db-credentials
+              key: db_host
+        - name: APP_USER
+          valueFrom:
+            secretKeyRef:
+              name: aurora-db-credentials
+              key: app_user
+        - name: APP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: aurora-db-credentials
+              key: app_password
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: aurora-db-credentials
+              key: db_name

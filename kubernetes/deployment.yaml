@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idempiere
+  namespace: app-prod
+  labels:
+    app: idempiere
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: idempiere
+  template:
+    metadata:
+      labels:
+        app: idempiere
+    spec:
+      containers:
+        - name: idempiere
+          image: public.ecr.aws/l1d4e6g1/sigmastream-repo:v1
+          # command: ["/bin/bash", "-c", "sleep infinity"]
+          ports:
+            - containerPort: 9090
+          resources:
+            requests:
+              cpu: "6144m"
+              memory: "13313Mi"
+            limits:
+              cpu: "6144m"
+              memory: "13313Mi"  
+          readinessProbe:
+            httpGet:
+              path: /WITSMLStore/services/Store   
+              port: 9090     
+            initialDelaySeconds: 360
+            periodSeconds: 5         
+            failureThreshold: 3      
+            successThreshold: 1
+            timeoutSeconds: 20
+      tolerations:
+        - key: "app"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule" 
